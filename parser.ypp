@@ -1,0 +1,828 @@
+%{
+	#include "attributes.h"
+	#include <iostream>
+	#include <stdlib.h>
+
+	using namespace std;
+	stack<int> whileStack;
+	bool mainExist = false;
+ 	type_t funcType = _NULL;
+	extern int yylex();
+	extern int yylineno;
+	extern char * yytext;
+	int yyerror(const char * message);
+	void match_operands(type_t type1, type_t type2, bool flag);
+	stack<Tuple> tables;
+	stack<int> offsets;
+	vector<Var> args, params;
+	stack<vector<Var> > callParams;
+	type_t get_variable_type(string name);
+	bool check_func_exist(string name, vector<Var> argList, type_t* retType);
+	int get_arr_size_and_type(string name, type_t* type, int* size);
+	string types[6] = {"INT","BOOL","STRING","BYTE","VOID","NONE"};
+%}
+
+
+
+%token ID NUM B STRING TRUE FALSE VOID INT
+%token IF
+%nonassoc IFX
+%nonassoc ELSE 
+%token BOOL BREAK COMMA BYTE RETURN SC WHILE ERROR
+%right ASSIGN 
+%left OR
+%left AND
+%left EQ NEQ
+%nonassoc LT GT LTE GTE
+%left ADD SUB
+%left DIV MUL
+%right NOT
+%left LBRACE RBRACE
+%left LBRACK RBRACK LPAREN RPAREN 
+
+
+
+%%
+
+Program	:	
+		{
+			/* insert print function to symbol table */
+			Tuple tuple;
+			vector<Var> printArgs;
+			Var var1 = {_STRING,-1,"a"};
+			printArgs.push_back(var1);
+			BaseRecord* printRecord = new FuncRecord("print",_VOID,printArgs);
+			tuple.table.push_back(printRecord);
+
+			/* insert printi function to symbol table */
+			vector<Var> printiArgs;
+			Var var2 = {_INT,-1,"a"}; 
+			printiArgs.push_back(var2);
+			BaseRecord* printiRecord = new FuncRecord("printi",_VOID,printiArgs);
+			tuple.table.push_back(printiRecord);
+
+			tuple.parent = NULL;
+			tables.push(tuple);
+			offsets.push(0);
+			
+
+		} Funcs 
+		{ 
+			
+			string tmp = yytext;
+			
+			if((tmp.compare("}") != 0) && (tmp.empty() == 0)){
+				errorSyn(yylineno);
+				exit(0);
+			}
+			if(mainExist == false){
+				errorMainMissing();
+				exit(0);
+			} 
+		} CLOSESCOPE
+
+		;
+
+Funcs	: /* epsilon */
+		| FuncDecl Funcs
+		;
+
+FuncDecl	:  RetType 
+			{ 
+				funcType = $1.type;
+			} 
+				ID
+			{ 					
+				$3.type = $1.type;	
+
+			} LPAREN Formals RPAREN 
+			{
+				type_t type;
+				if($1.type == _VOID && $3.name == "main" && args.empty()){
+					mainExist = true;
+				}
+				if(check_func_exist($3.name, args,NULL)){
+					errorDef(yylineno, $3.name);
+					exit(0);
+				}
+
+				BaseRecord* funcRecord = new FuncRecord($3.name, $1.type, args);
+				tables.top().table.push_back(funcRecord);
+			}	LBRACE OPENSCOPE 
+			{				
+				BaseRecord* record;
+				int size1, res, size, offset = offsets.top();
+				type_t type1, type2;
+				
+				for(vector<Var>::iterator it = args.begin(); it != args.end(); ++it){
+					if((res = get_arr_size_and_type(it->name, &type1, &size1)) == 0 || 
+						(type2 = get_variable_type(it->name)) != _NULL || check_func_exist(it->name,vector<Var>(),NULL)){ // ID var or arr don't exist
+						errorDef(yylineno, it->name);
+						exit(0);
+					}
+					if(it->size > 0){
+						offset -= it->size;
+						record = new ArrRecord(it->name,it->type,offset,it->size);
+					}
+					else {
+						offset--;
+						record = new Record(it->name,it->type,offset);
+					}
+					
+					tables.top().table.push_back(record);
+				}
+
+				args.clear();
+			} Statments RBRACE CLOSESCOPE { funcType = _NULL; }
+			;
+
+RetType	: Type { $$.type = $1.type; }
+		| VOID { $$.type = _VOID; }
+		;
+
+Formals	: /* epsilon */
+		| FormalsList
+		;
+
+FormalsList	: FormalDecl
+			| FormalDecl COMMA FormalsList
+			;
+
+FormalDecl	: Type ID
+			{ 				
+				type_t type;
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				Var var = {$1.type,-1,$2.name};
+
+				args.push_back(var);				
+			}
+			| Type ID LBRACK NUM RBRACK 
+			{ 
+				type_t type;
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if($4.val <= 0 || $4.val >= 256){
+					errorInvalidArraySize(yylineno,$2.name);
+					exit(0);
+				}
+				Var var = {$1.type,$4.val,$2.name};
+				args.push_back(var);
+			}
+			| Type ID LBRACK NUM B RBRACK 
+			{ 
+				type_t type;
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if($4.val <= 0){
+					errorInvalidArraySize(yylineno,$2.name);
+					exit(0);
+				}				
+				if($4.val >= 256){
+					errorByteTooLarge(yylineno,NumberToString($4.val));
+					exit(0);
+				}
+				Var var = {$1.type,$4.val,$2.name};
+				args.push_back(var);
+			}
+			;
+
+Statments	: Statement
+			| Statments Statement
+			;
+
+Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
+			| Type ID SC
+			{ 				
+				type_t type;
+				int size, res;
+				res = get_arr_size_and_type($2.name, &type, &size);
+				type = get_variable_type($2.name);
+				if(res == 0 || type != _NULL){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+
+				$2.type = $1.type;
+				$2.size = -1;
+				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
+				tables.top().table.push_back(record);
+				offsets.top()++;
+			}
+			| Type ID ASSIGN Exp SC
+			{ 				
+				type_t type = get_variable_type($2.name);
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if(type != _NULL){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				else if($1.type == _INT && ($4.type != _INT && $4.type != _BYTE )){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type != _INT && $1.type != $4.type){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+
+				$2.type = $1.type;
+				$2.size = -1;
+				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
+				tables.top().table.push_back(record);
+				offsets.top()++;
+			}
+			| Type ID LBRACK NUM RBRACK SC
+			{ 				
+				type_t type;
+				int size, res;
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				res = get_arr_size_and_type($2.name, &type, &size);
+				type = get_variable_type($2.name);
+				if(res == 0 || type != _NULL){
+					
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if($4.val <= 0 || $4.val >= 256){
+					errorInvalidArraySize(yylineno,$2.name);
+					exit(0);
+				}
+				$2.type = $1.type;
+				$2.size = $4.val;
+				
+				BaseRecord* record = new ArrRecord($2.name, $1.type, offsets.top(), $2.size);
+				tables.top().table.push_back(record);
+				offsets.top()+=$2.size;
+			}
+			| Type ID LBRACK NUM B RBRACK SC
+			{ 				
+				type_t type;
+				int size, res;
+				if(check_func_exist($2.name, vector<Var>(),NULL)){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				res = get_arr_size_and_type($2.name, &type, &size);
+				type = get_variable_type($2.name);
+				if(res == 0 || type != _NULL){
+					errorDef(yylineno, $2.name);
+					exit(0);
+				}
+				if($4.val <= 0){
+					errorInvalidArraySize(yylineno,$2.name);
+					exit(0);
+				}
+				if($4.val >= 256){
+					errorByteTooLarge(yylineno,NumberToString($4.val));
+					exit(0);
+				}
+				$2.type = $1.type;
+				$2.size = $4.val;
+				
+				BaseRecord* record = new ArrRecord($2.name, $1.type, offsets.top(), $2.size);
+				tables.top().table.push_back(record);
+				offsets.top()+=$2.size;
+			}
+			| ID ASSIGN Exp SC 
+			{
+				type_t type1, type2;
+				int size, res;
+				if((res = get_arr_size_and_type($1.name, &type1, &size)) == -1 && 
+					(type2 = get_variable_type($1.name)) == _NULL){ // ID var or arr don't exist
+					errorUndef(yylineno, $1.name);
+					exit(0);
+				}
+				else if(res == 0){ // ID is arr
+					$1.type = type1;
+					$1.size = size;
+				}
+				else if(type2 != _NULL){ // ID is var
+					$1.type = type2;
+					$1.size = -1;
+				}
+
+				
+				if($3.size != $1.size){
+					errorMismatch(yylineno);
+					exit(0);
+				}
+				else if ($1.size > 0 && $3.type != $1.type){
+					errorMismatch(yylineno);
+					exit(0);
+				}
+				else if($1.type == _INT && ($3.type != _INT && $3.type != _BYTE )){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type != _INT && $1.type != $3.type){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+			}
+			| ID LBRACK Exp RBRACK ASSIGN Exp SC
+			{				
+				type_t type = _NULL, type1 = _NULL, type2;
+				int size, res;
+				if((type1 = get_variable_type($1.name)) != _NULL){
+					errorMismatch(yylineno); 
+					exit(0);				
+				}
+
+				res = get_arr_size_and_type($1.name, &type, &size);
+				if(res == -1){
+					errorUndef(yylineno, $1.name);
+					exit(0);
+				} 	
+				$1.type = type;
+				$1.size = size;
+
+				if((res = get_arr_size_and_type($6.name, &type1, &size)) == -1 && 
+					(type2 = get_variable_type($6.name)) == _NULL){ // ID var or arr don't exist
+					
+				}
+				else if(res == 0){ // ID is arr
+					$6.type = type1;
+				}
+				else if(type2 != _NULL){ // ID is var
+					$6.type = type2;
+					$6.size = -1;
+				}
+				
+				if($6.size != -1){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				if($3.type != _INT && $3.type != _BYTE){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type == _INT && ($6.type != _INT && $6.type != _BYTE )){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type == _BYTE && $6.type != _BYTE){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type == _BOOL && $6.type !=_BOOL){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($1.type == _STRING && $6.type !=_STRING){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+			}
+			| Call SC
+			| RETURN SC 
+			{ 
+				if(funcType == _NULL){
+					errorSyn(yylineno); 
+					exit(0);
+				}
+				if(funcType != _VOID){ 
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+			}
+			| RETURN Exp SC 
+			{ 				
+				if(funcType == _NULL){ 
+					errorSyn(yylineno); 
+					exit(0); 
+				}
+				if (funcType == _INT && ($2.type != _INT && $2.type != _BYTE)){
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if(funcType != _INT && funcType != $2.type){ 
+					errorMismatch(yylineno); 
+					exit(0); 
+				}
+				else if($2.size != -1){
+					errorMismatch(yylineno); 
+					exit(0);
+				}
+				else if(funcType == _VOID){
+					errorMismatch(yylineno); 
+					exit(0);					
+				}
+			}
+			| IF LPAREN IfExp RPAREN OPENSCOPE Statement CLOSESCOPE %prec IFX
+
+			| IF LPAREN IfExp RPAREN OPENSCOPE Statement CLOSESCOPE ELSE OPENSCOPE Statement CLOSESCOPE
+
+			| WHILE LPAREN Exp RPAREN 	
+			{ 
+				whileStack.push(1); 
+				if($3.type != _BOOL){
+					errorMismatch(yylineno);
+					exit(0);
+				} 
+			} OPENSCOPE Statement CLOSESCOPE { whileStack.pop(); }
+			| BREAK SC 
+			{ 
+				if(whileStack.empty() || !whileStack.top()){ 
+					errorUnexpectedBreak(yylineno); 
+					exit(0);
+				}
+			}
+			;
+
+IfExp 	: Exp 			
+		{			
+			if($1.type != _BOOL){
+			
+				errorMismatch(yylineno);
+				exit(0);
+			}
+		}
+		;
+Call	: ID LPAREN P ExpList RPAREN
+ 		{
+ 			type_t type;
+			if(!check_func_exist($1.name, callParams.top(), &type)){
+				errorUndefFunc(yylineno, $1.name);
+				exit(0);
+			}
+
+			$$.type = $1.type = type;
+			callParams.pop();
+		}
+		| ID LPAREN RPAREN 
+		{
+ 			type_t type;			
+			if(!check_func_exist($1.name, vector<Var>(),&type)){
+				errorUndefFunc(yylineno, $1.name);
+				exit(0);
+			}
+			$$.type = $1.type = type;
+		}
+		;
+
+P 	: { callParams.push(vector<Var>()); }
+	;
+
+ExpList	: Exp 
+		{ 			
+			Var var = {$1.type, $1.size};
+			callParams.top().push_back(var); 
+		}
+		| Exp
+		{ 			
+			Var var = {$1.type, $1.size}; 
+			callParams.top().push_back(var); 
+		} COMMA ExpList 
+
+		;
+
+Type 	: INT { $$.type = _INT; }
+		| BYTE { $$.type = _BYTE; }
+		| BOOL { $$.type = _BOOL; }
+		;
+
+Exp 	: LPAREN Exp RPAREN { $$ = $2; }
+		| ID LBRACK Exp RBRACK	
+		{ 			
+			int res, size;
+			type_t type1, type2;
+
+			if((res = get_arr_size_and_type($1.name, &type1, &size)) == -1 && 
+				(type2 = get_variable_type($1.name)) == _NULL){ // ID var or arr don't exist
+				errorUndef(yylineno, $1.name);
+				exit(0);
+			}
+			else if(res == 0){ // ID is arr
+				$1.type = type1;
+				$1.size = size;
+			}
+			else if(type2 != _NULL){ // ID is var
+				errorMismatch(yylineno);
+				exit(0);
+			}
+
+			$1.type = type1;
+			if((res = get_arr_size_and_type($3.name, &type1, &size)) == -1 && 
+				(type2 = get_variable_type($3.name)) == _NULL){ // ID var or arr don't exist
+
+			}
+			else if(res == 0){ // ID is arr
+				$3.type = type1;
+				$3.size = size;
+			}
+			else if(type2 != _NULL){ // ID is var
+				
+				$3.type = type2;
+				$3.size = -1;
+			}
+			
+			if($3.type != _BYTE && $3.type != _INT){
+				errorMismatch(yylineno);
+				exit(0);
+			}
+			$$.size = -1;
+			$$.type = $1.type;
+		} 
+		| Exp SUB Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			if($1.type == _INT || $3.type == _INT){
+				$$.type = _INT;
+			}
+			else {
+				$$.type = _BYTE;
+			} 
+			$$.size = -1;
+		}
+		| Exp ADD Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			if($1.type == _INT || $3.type == _INT){
+				$$.type = _INT;
+			}
+			else {
+				$$.type = _BYTE;
+			} 
+			$$.size = -1;
+		}		
+		| Exp MUL Exp
+		{ 
+			match_operands($1.type,$3.type,true); 
+			if($1.type == _INT || $3.type == _INT){
+				$$.type = _INT;
+			}
+			else {
+				$$.type = _BYTE;
+			} 
+			$$.size = -1;
+		}
+		| Exp DIV Exp
+		{ 
+			match_operands($1.type,$3.type,true); 
+			if($1.type == _INT || $3.type == _INT){
+				$$.type = _INT;
+			}
+			else {
+				$$.type = _BYTE;
+			} 
+			$$.size = -1;
+		}
+		| ID
+		{ 			
+			type_t type1, type2;
+			int size, res;
+			if((res = get_arr_size_and_type($1.name, &type1, &size)) == -1 && 
+				(type2 = get_variable_type($1.name)) == _NULL){ // ID var or arr don't exist
+				errorUndef(yylineno, $1.name);
+				exit(0);
+			}
+			else if(res == 0){ // ID is arr
+				$1.type = type1;
+				$1.size = size;
+			}
+			else if(type2 != _NULL){ // ID is var
+				
+				$1.type = type2;
+				$1.size = -1;
+			}
+			$$ = $1; 
+		}
+		| Call { $$ = $1; $$.size = -1;}
+		| NUM { $$.type = _INT; $$.val = $1.val; $$.size = -1;}
+		| NUM B 
+		{ 			
+			if($1.val < 0 || $1.val >= 256){
+				errorByteTooLarge(yylineno,NumberToString($1.val));
+				exit(0);
+			}
+			$$.type = _BYTE; 
+			$$.val = $1.val;
+			$$.size = -1; 
+		}
+		| STRING  { $$.type = _STRING; $$.size = -1;}
+		| TRUE { $$.type = _BOOL; $$.size = -1;}
+		| FALSE { $$.type = _BOOL; $$.size = -1;}
+		| NOT Exp 
+		{ 
+			if($2.type != _BOOL){
+				
+				errorMismatch(yylineno);
+				exit(0);
+			} 
+			$$.type = _BOOL;
+			$$.size = -1;
+		}
+		| Exp AND Exp { match_operands($1.type,$3.type,false); $$.type = _BOOL; $$.size = -1;}
+		| Exp OR Exp { match_operands($1.type,$3.type,false); $$.type = _BOOL; $$.size = -1;}
+		| Exp EQ Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp NEQ Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp LT Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp GT Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp LTE Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp GTE Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		;
+
+OPENSCOPE	: {
+				Tuple tuple;
+				tuple.parent = &(tables.top());
+				tables.push(tuple);
+				offsets.push(offsets.top());
+			}
+			;
+
+CLOSESCOPE	: {
+				endScope();
+				
+				Tuple* tuple = &(tables.top());
+				vector<BaseRecord*>* table = &(tuple->table);
+				
+				Record* record;
+				ArrRecord* arrRecord;
+				FuncRecord* funcRecord;
+				for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
+					arrRecord = dynamic_cast<ArrRecord*>(*it);
+					if(arrRecord != NULL){ // record of array
+						printID(arrRecord->name,arrRecord->offset,makeArrayType(types[arrRecord->type],arrRecord->size));
+						continue;
+					}
+
+					record = dynamic_cast<Record*>(*it);
+					if(record != NULL){ // record of variable	
+						printID(record->name, record->offset, types[record->type]);
+						continue;
+					}
+
+					funcRecord = dynamic_cast<FuncRecord*>(*it);
+					if(funcRecord != NULL){ // record of function
+						vector<string> tmp;
+						for(vector<Var>::iterator it = funcRecord->args.begin(); it != funcRecord->args.end(); ++it){
+							if(it->size > 0){
+								tmp.push_back(types[it->type]+'['+NumberToString(it->size)+']');
+								continue;
+							}
+							tmp.push_back(types[it->type]);
+
+						}
+						printID(funcRecord->name, 0, makeFunctionType(types[funcRecord->type],tmp));
+						continue;
+					}
+				}
+				tables.pop();
+				offsets.pop();
+			}
+			;
+
+%%
+
+int main()
+{
+	yyparse();
+}
+
+int yyerror(const char * message)
+{
+	errorSyn(yylineno);
+	exit(0);
+}
+
+/* flag == true checks for numeric types, type == false checks for bool value */
+void match_operands(type_t type1, type_t type2, bool flag){
+	
+	if (flag == true){
+		if((type1 != _INT && type1 != _BYTE) || (type2 != _INT && type2 != _BYTE)){
+			errorMismatch(yylineno);
+			exit(0);
+		}
+	}
+	else if (flag == false){
+		if((type1 != _BOOL) || (type2 != _BOOL)){
+			errorMismatch(yylineno);
+			exit(0);
+		}
+	}
+}
+
+/* return true if varialbe was declared, false if not */
+type_t get_variable_type(string name){
+	Tuple *tuple = &(tables.top());
+	vector<BaseRecord*>* table;
+	Record* record;
+	ArrRecord* arrRecord;
+	while(tuple != NULL){
+		table = &(tuple->table);
+		for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
+			arrRecord = dynamic_cast<ArrRecord*>(*it);
+			if(arrRecord != NULL){
+				continue;
+			}
+
+			record = dynamic_cast<Record*>(*it);
+			if(record == NULL){
+				continue;
+			}
+			if(record->name == name){
+				return record->type;
+			}
+		}
+		tuple = tuple->parent;
+	}
+	return _NULL;
+}
+
+int get_arr_size_and_type(string name, type_t* type, int* size){
+	if(!type || !size){
+		return -1;
+	}
+
+	Tuple *tuple = &(tables.top());
+	vector<BaseRecord*>* table;
+	ArrRecord* arrRecord;
+	while(tuple != NULL){
+		table = &(tuple->table);
+		for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
+			arrRecord = dynamic_cast<ArrRecord*>(*it);
+			if(arrRecord == NULL){
+				continue;
+			}
+			if(arrRecord->name == name){
+				*type = (arrRecord->type);
+				*size = (arrRecord->size);
+				return 0;
+			}
+		}
+		tuple = tuple->parent;
+	}
+	return -1;
+}
+
+bool check_func_exist(string name, vector<Var> argList, type_t* retType){
+	Tuple *tuple = &(tables.top());
+	vector<BaseRecord*>* table;
+	vector<Var>::iterator it1,it2, tmp;
+	vector<string> errorArgs;
+	FuncRecord* funcRecord;
+	BaseRecord* baseRecord;
+
+	while(tuple != NULL){
+		table = &(tuple->table);
+		for(vector<BaseRecord*>::iterator it = tuple->table.begin(); it != tuple->table.end(); ++it){	
+			funcRecord = dynamic_cast<FuncRecord*>(*it);
+			if(funcRecord == NULL){
+				continue;
+			}
+			if(funcRecord->name == name){
+				if(retType == NULL){
+					return true;
+				}
+				if(argList.size() != funcRecord->args.size()){
+					for(tmp = funcRecord->args.begin(); tmp != funcRecord->args.end();++tmp){
+							if(tmp->size > 0){
+								errorArgs.push_back(types[tmp->type]+'['+NumberToString(tmp->size)+']');
+								continue;
+							}
+							errorArgs.push_back(types[tmp->type]);
+
+					}
+					errorPrototypeMismatch(yylineno,name,errorArgs);
+					exit(0);
+				}
+
+				for(it1 = argList.begin(),it2 = funcRecord->args.begin(); it1 != argList.end(); ++it1, ++it2){
+					if((it2->type == _INT && (it1->type != _INT && it1->type != _BYTE)) ||  
+						(it2->type != _INT && it2->type != it1->type) || it1->size != it2->size){
+						for(tmp = funcRecord->args.begin(); tmp != funcRecord->args.end();++tmp){
+							if(tmp->size > 0){
+								errorArgs.push_back(types[tmp->type]+'['+NumberToString(tmp->size)+']');
+								continue;
+							}
+							errorArgs.push_back(types[tmp->type]);
+						}
+						errorPrototypeMismatch(yylineno,name,errorArgs);
+						exit(0);
+					}
+				}
+				*retType = funcRecord->type;
+				return true;
+			}
+		}
+		tuple = tuple->parent;
+	}
+	return false;
+}
