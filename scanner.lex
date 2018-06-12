@@ -7,8 +7,6 @@
 #include "attributes.h"
 #include "parser.tab.hpp"
 
-void showToken(const char* name);
-
 %}
 
 %option yylineno
@@ -80,7 +78,4 @@ break							return BREAK;
 										
 %%
 
-void showToken(const char* name) {
-	
-}
 

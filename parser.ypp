@@ -20,6 +20,9 @@
 	bool check_func_exist(string name, vector<Var> argList, type_t* retType);
 	int get_arr_size_and_type(string name, type_t* type, int* size);
 	string types[6] = {"INT","BOOL","STRING","BYTE","VOID","NONE"};
+
+
+	Regs regs;
 %}
 
 
