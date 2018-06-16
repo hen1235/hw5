@@ -225,6 +225,15 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
 				tables.top().table.push_back(record);
 				offsets.top()++;
+				$2.place = get_empty_reg();
+				CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+
+				// if($2.type == _BOOL){
+				// 	CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+				// }
+				// else{
+
+				// }
 			}
 			| Type ID ASSIGN Exp SC
 			{ 				
@@ -251,6 +260,19 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
 				tables.top().table.push_back(record);
 				offsets.top()++;
+				$2.place = get_empty_reg();
+				if($2.type != _BOOL){
+					CodeBuffer.emit("move $" + NumberToString($2.place) + "," + NumberToString($4.place));
+					free_reg($4.place);
+				}
+				else {
+					CodeBuffer.bpatch($4.falseList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+					CodeBuffer.emit("j " + CodeBuffer.genLabel());
+					CodeBuffer.bpatch($4.trueList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($2.place) + ",1");		
+				}
+
 			}
 			| Type ID LBRACK NUM RBRACK SC
 			{ 				
@@ -637,6 +659,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _INT; 
 			$$.val = $1.val; 
 			$$.size = -1;
+
 			$$.place = get_empty_reg();
 			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val));
 		}
@@ -649,6 +672,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BYTE; 
 			$$.val = $1.val;
 			$$.size = -1;
+
 			$$.place = get_empty_reg();
 			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val)); 
 		}
