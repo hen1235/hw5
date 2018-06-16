@@ -22,7 +22,11 @@
 	string types[6] = {"INT","BOOL","STRING","BYTE","VOID","NONE"};
 
 
-	Regs regs;
+	vector<int> freeRegs(18,0);
+	CodeBuffer& CodeBuffer = CodeBuffer::instance();
+	void free_reg_list(vector<int>& regs);
+	int get_empty_reg();
+	void free_reg(int num);
 %}
 
 
@@ -553,6 +557,10 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$$.type = _BYTE;
 			} 
 			$$.size = -1;
+
+			$$.place = $1.place;
+			CodeBuffer.emit("subu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			free_reg($2.place);
 		}
 		| Exp ADD Exp 
 		{ 
@@ -564,6 +572,10 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$$.type = _BYTE;
 			} 
 			$$.size = -1;
+
+			$$.place = $1.place;
+			CodeBuffer.emit("addu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			free_reg($2.place);
 		}		
 		| Exp MUL Exp
 		{ 
@@ -575,6 +587,10 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$$.type = _BYTE;
 			} 
 			$$.size = -1;
+
+			$$.place = $1.place;
+			CodeBuffer.emit("mul $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			free_reg($2.place);
 		}
 		| Exp DIV Exp
 		{ 
@@ -586,6 +602,10 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$$.type = _BYTE;
 			} 
 			$$.size = -1;
+
+			$$.place = $1.place;
+			CodeBuffer.emit("div $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			free_reg($2.place);			
 		}
 		| ID
 		{ 			
@@ -605,10 +625,21 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$1.type = type2;
 				$1.size = -1;
 			}
-			$$ = $1; 
+			$$ = $1;
+
+			// if($1.type == _BOOL){
+
+			// } 
 		}
 		| Call { $$ = $1; $$.size = -1;}
-		| NUM { $$.type = _INT; $$.val = $1.val; $$.size = -1;}
+		| NUM 
+		{ 
+			$$.type = _INT; 
+			$$.val = $1.val; 
+			$$.size = -1;
+			$$.place = get_empty_reg();
+			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val));
+		}
 		| NUM B 
 		{ 			
 			if($1.val < 0 || $1.val >= 256){
@@ -617,11 +648,25 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			}
 			$$.type = _BYTE; 
 			$$.val = $1.val;
-			$$.size = -1; 
+			$$.size = -1;
+			$$.place = get_empty_reg();
+			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val)); 
 		}
 		| STRING  { $$.type = _STRING; $$.size = -1;}
-		| TRUE { $$.type = _BOOL; $$.size = -1;}
-		| FALSE { $$.type = _BOOL; $$.size = -1;}
+		| TRUE 
+		{ 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+		}
+		| FALSE 
+		{ 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+		}
 		| NOT Exp 
 		{ 
 			if($2.type != _BOOL){
@@ -631,16 +676,107 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			} 
 			$$.type = _BOOL;
 			$$.size = -1;
+
+			$$.trueList = $$.falseList;
+			$$.falseList = $$.trueList;
 		}
-		| Exp AND Exp { match_operands($1.type,$3.type,false); $$.type = _BOOL; $$.size = -1;}
-		| Exp OR Exp { match_operands($1.type,$3.type,false); $$.type = _BOOL; $$.size = -1;}
-		| Exp EQ Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
-		| Exp NEQ Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
-		| Exp LT Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
-		| Exp GT Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
-		| Exp LTE Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
-		| Exp GTE Exp { match_operands($1.type,$3.type,true); $$.type = _BOOL; $$.size = -1;}
+		| Exp AND M Exp 
+		{ 
+			cout << "here" << endl;
+			match_operands($1.type,$4.type,false); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			CodeBuffer.bpatch($1.trueList,$3.quad); 
+			$$.trueList = $4.trueList; 
+			$$.falseList = CodeBuffer.merge($1.falseList,$4.falseList);
+		}
+		| Exp OR M Exp 
+		{ 
+			match_operands($1.type,$4.type,false); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			CodeBuffer.bpatch($1.falseList,$3.quad); 
+			$$.trueList = CodeBuffer.merge($1.trueList,$4.trueList); 
+			$$.falseList  = $4.falseList;
+		}
+		| Exp EQ Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("beq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);
+		}
+		| Exp NEQ Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("neq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);
+		}
+		| Exp LT Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("blt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);		
+		}
+		| Exp GT Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("bgt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);
+		}
+		| Exp LTE Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("ble $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);
+		}
+		| Exp GTE Exp 
+		{ 
+			match_operands($1.type,$3.type,true); 
+			$$.type = _BOOL; 
+			$$.size = -1;
+
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			CodeBuffer.emit("bge $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
+			free_reg($1.place);
+			free_reg($3.place);
+		}
 		;
+
+M 	: { $$.quad = CodeBuffer.genLabel(); }
+	;
 
 OPENSCOPE	: {
 				Tuple tuple;
@@ -651,7 +787,7 @@ OPENSCOPE	: {
 			;
 
 CLOSESCOPE	: {
-				endScope();
+				//endScope();
 				
 				Tuple* tuple = &(tables.top());
 				vector<BaseRecord*>* table = &(tuple->table);
@@ -662,13 +798,13 @@ CLOSESCOPE	: {
 				for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
 					arrRecord = dynamic_cast<ArrRecord*>(*it);
 					if(arrRecord != NULL){ // record of array
-						printID(arrRecord->name,arrRecord->offset,makeArrayType(types[arrRecord->type],arrRecord->size));
+						//printID(arrRecord->name,arrRecord->offset,makeArrayType(types[arrRecord->type],arrRecord->size));
 						continue;
 					}
 
 					record = dynamic_cast<Record*>(*it);
 					if(record != NULL){ // record of variable	
-						printID(record->name, record->offset, types[record->type]);
+						//printID(record->name, record->offset, types[record->type]);
 						continue;
 					}
 
@@ -683,7 +819,7 @@ CLOSESCOPE	: {
 							tmp.push_back(types[it->type]);
 
 						}
-						printID(funcRecord->name, 0, makeFunctionType(types[funcRecord->type],tmp));
+						//printID(funcRecord->name, 0, makeFunctionType(types[funcRecord->type],tmp));
 						continue;
 					}
 				}
@@ -697,6 +833,8 @@ CLOSESCOPE	: {
 int main()
 {
 	yyparse();
+	CodeBuffer.printCodeBuffer();
+	CodeBuffer.printDataBuffer();
 }
 
 int yyerror(const char * message)
@@ -829,3 +967,23 @@ bool check_func_exist(string name, vector<Var> argList, type_t* retType){
 	}
 	return false;
 }
+void free_reg(int num){
+	freeRegs[num-8] = 0;
+}
+
+
+void free_reg_list(vector<int>& regs){
+	for(vector<int>::iterator it = regs.begin(); it != regs.end(); ++it){
+		freeRegs[*it-8] = 0;
+	}
+};
+
+int get_empty_reg(){
+	for(vector<int>::iterator it = freeRegs.begin(); it != freeRegs.end(); ++it){
+		if(*it == 0){
+			*it = 1;
+			return (it - freeRegs.begin() + 8);
+		}
+	}
+	exit(0);
+};
