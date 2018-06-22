@@ -21,12 +21,13 @@
 	int get_arr_size_and_type(string name, type_t* type, int* size);
 	string types[6] = {"INT","BOOL","STRING","BYTE","VOID","NONE"};
 
-
 	vector<int> freeRegs(18,0);
 	CodeBuffer& CodeBuffer = CodeBuffer::instance();
 	void free_reg_list(vector<int>& regs);
 	int get_empty_reg();
 	void free_reg(int num);
+	int get_variable_off(string name);
+	int get_arr_offset(string name);
 %}
 
 
@@ -225,11 +226,13 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
 				tables.top().table.push_back(record);
 				offsets.top()++;
+
 				$2.place = get_empty_reg();
+				CodeBuffer.emit("subu $sp,$sp,4"); // space in stack for variable
 				CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+				CodeBuffer.emit("sw $" + NumberToString($2.place) + ",($sp)");
 
 				// if($2.type == _BOOL){
-				// 	CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
 				// }
 				// else{
 
@@ -260,17 +263,24 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
 				tables.top().table.push_back(record);
 				offsets.top()++;
-				$2.place = get_empty_reg();
+
 				if($2.type != _BOOL){
-					CodeBuffer.emit("move $" + NumberToString($2.place) + "," + NumberToString($4.place));
+					CodeBuffer.emit("subu $sp,$sp,4");
+					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
 					free_reg($4.place);
+					$1.val = $3.val;				
 				}
 				else {
+					$4.place = get_empty_reg();
+					CodeBuffer.bpatch($4.trueList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($2.place) + ",1");
+					int afterTrue = CodeBuffer.emit("j ");
 					CodeBuffer.bpatch($4.falseList,CodeBuffer.genLabel());
 					CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
-					CodeBuffer.emit("j " + CodeBuffer.genLabel());
-					CodeBuffer.bpatch($4.trueList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($2.place) + ",1");		
+					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
+					CodeBuffer.emit("subu $sp,$sp,4");
+					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
+					free_reg($4.place);	
 				}
 
 			}
@@ -299,6 +309,10 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new ArrRecord($2.name, $1.type, offsets.top(), $2.size);
 				tables.top().table.push_back(record);
 				offsets.top()+=$2.size;
+
+				CodeBuffer.emit("subu $sp,$sp," + NumberToString($2.size*4)); // space in stack for array
+				// CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+				// CodeBuffer.emit("sw $" + NumberToString($2.place) + ",($sp)");
 			}
 			| Type ID LBRACK NUM B RBRACK SC
 			{ 				
@@ -328,6 +342,9 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				BaseRecord* record = new ArrRecord($2.name, $1.type, offsets.top(), $2.size);
 				tables.top().table.push_back(record);
 				offsets.top()+=$2.size;
+
+				CodeBuffer.emit("subu $sp,$sp," + NumberToString($2.size*4)); // space in stack for array
+
 			}
 			| ID ASSIGN Exp SC 
 			{
@@ -347,7 +364,6 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					$1.size = -1;
 				}
 
-				
 				if($3.size != $1.size){
 					errorMismatch(yylineno);
 					exit(0);
@@ -363,6 +379,26 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				else if($1.type != _INT && $1.type != $3.type){
 					errorMismatch(yylineno); 
 					exit(0); 
+				}
+
+				int offset = get_variable_off($1.name);
+				// cout << "offset = " << offset << endl;
+				if($1.type != _BOOL){
+					CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offset) + "($fp)");
+					free_reg($3.place);
+					$1.val = $3.val;				
+				}
+				else {
+					$3.place = get_empty_reg();
+					CodeBuffer.bpatch($3.trueList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($1.place) + ",1");
+					int afterTrue = CodeBuffer.emit("j ");
+					CodeBuffer.bpatch($3.falseList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($1.place) + ",0");
+					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
+					CodeBuffer.emit("subu $sp,$sp,4");
+					CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offset) + "($fp)");
+					free_reg($3.place);	
 				}
 			}
 			| ID LBRACK Exp RBRACK ASSIGN Exp SC
@@ -418,6 +454,27 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					errorMismatch(yylineno); 
 					exit(0); 
 				}
+
+				int offset = get_arr_offset($1.name);
+				// cout << "offset = " << offset << endl;
+				if($1.type != _BOOL){
+					CodeBuffer.emit("sw $" + NumberToString($6.place) + "," + NumberToString(-4*(offset+$3.val)) + "($fp)");
+					free_reg($6.place);
+					$1.val = $3.val;				
+				}
+				else {
+					$6.place = get_empty_reg();
+					CodeBuffer.bpatch($6.trueList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($1.place) + ",1");
+					int afterTrue = CodeBuffer.emit("j ");
+					CodeBuffer.bpatch($6.falseList,CodeBuffer.genLabel());
+					CodeBuffer.emit("move $" + NumberToString($1.place) + ",0");
+					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
+					CodeBuffer.emit("subu $sp,$sp,4");
+					CodeBuffer.emit("sw $" + NumberToString($6.place) + "," + NumberToString(-4*(offset+$3.val)) + "($fp)");
+					free_reg($6.place);	
+				}
+				free_reg($3.place);
 			}
 			| Call SC
 			| RETURN SC 
@@ -676,7 +733,14 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.place = get_empty_reg();
 			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val)); 
 		}
-		| STRING  { $$.type = _STRING; $$.size = -1;}
+		| STRING  
+		{ 
+			string str = yytext;
+			cout << str << endl;
+			$$.type = _STRING; $$.size = -1;
+
+			CodeBuffer.emitData("string 	.asciiz " + NumberToString(str));
+		}
 		| TRUE 
 		{ 
 			$$.type = _BOOL; 
@@ -706,7 +770,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		}
 		| Exp AND M Exp 
 		{ 
-			cout << "here" << endl;
+			// cout << "here" << endl;
 			match_operands($1.type,$4.type,false); 
 			$$.type = _BOOL; 
 			$$.size = -1;
@@ -731,9 +795,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("beq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);
 		}
@@ -743,9 +806,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("neq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("neq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);
 		}
@@ -755,9 +817,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("blt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("blt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);		
 		}
@@ -767,9 +828,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("bgt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("bgt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);
 		}
@@ -779,9 +839,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("ble $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("ble $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);
 		}
@@ -791,9 +850,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("bge $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			CodeBuffer.emit("bge $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", ");
 			free_reg($1.place);
 			free_reg($3.place);
 		}
@@ -911,6 +969,32 @@ type_t get_variable_type(string name){
 	return _NULL;
 }
 
+int get_variable_off(string name){
+	Tuple *tuple = &(tables.top());
+	vector<BaseRecord*>* table;
+	Record* record;
+	ArrRecord* arrRecord;
+	while(tuple != NULL){
+		table = &(tuple->table);
+		for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
+			arrRecord = dynamic_cast<ArrRecord*>(*it);
+			if(arrRecord != NULL){
+				continue;
+			}
+
+			record = dynamic_cast<Record*>(*it);
+			if(record == NULL){
+				continue;
+			}
+			if(record->name == name){
+				return record->offset;
+			}
+		}
+		tuple = tuple->parent;
+	}
+	return -1;
+}
+
 int get_arr_size_and_type(string name, type_t* type, int* size){
 	if(!type || !size){
 		return -1;
@@ -930,6 +1014,26 @@ int get_arr_size_and_type(string name, type_t* type, int* size){
 				*type = (arrRecord->type);
 				*size = (arrRecord->size);
 				return 0;
+			}
+		}
+		tuple = tuple->parent;
+	}
+	return -1;
+}
+
+int get_arr_offset(string name){
+	Tuple *tuple = &(tables.top());
+	vector<BaseRecord*>* table;
+	ArrRecord* arrRecord;
+	while(tuple != NULL){
+		table = &(tuple->table);
+		for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
+			arrRecord = dynamic_cast<ArrRecord*>(*it);
+			if(arrRecord == NULL){
+				continue;
+			}
+			if(arrRecord->name == name){
+				return arrRecord->offset;
 			}
 		}
 		tuple = tuple->parent;
