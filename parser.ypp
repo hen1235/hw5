@@ -28,6 +28,7 @@
 	void free_reg(int num);
 	int get_variable_off(string name);
 	int get_arr_offset(string name);
+	int get_offset_of_vars_in_stack();
 %}
 
 
@@ -73,6 +74,25 @@ Program	:
 			tables.push(tuple);
 			offsets.push(0);
 			
+			CodeBuffer.emitData("DivByZeroMsg: 	.asciiz \"Error division by zero\n\"");
+			CodeBuffer.emit("ZeroDivision:");
+			CodeBuffer.emit("la $a0,DivByZeroMsg");
+			CodeBuffer.emit("li $v0,4");
+			CodeBuffer.emit("syscall");
+			CodeBuffer.emit("li $v0,10");
+			CodeBuffer.emit("syscall");
+
+			// CodeBuffer.emitData("IndexOutOfBoundsMsg: 	.asciiz \"Error index out of bounds\n\"");
+			// CodeBuffer.emit("IndexOutOfBounds:");
+			// CodeBuffer.emit("la $a0,IndexOutOfBoundsMsg");
+			// CodeBuffer.emit("li $v0,4");
+			// CodeBuffer.emit("syscall");
+			// CodeBuffer.emit("li $v0,10");
+			// CodeBuffer.emit("syscall");
+
+
+
+
 
 		} Funcs 
 		{ 
@@ -88,7 +108,6 @@ Program	:
 				exit(0);
 			} 
 		} CLOSESCOPE
-
 		;
 
 Funcs	: /* epsilon */
@@ -103,7 +122,8 @@ FuncDecl	:  RetType
 			{ 					
 				$3.type = $1.type;	
 
-			} LPAREN Formals RPAREN 
+			} 
+				LPAREN Formals RPAREN 
 			{
 				type_t type;
 				if($1.type == _VOID && $3.name == "main" && args.empty()){
@@ -116,7 +136,14 @@ FuncDecl	:  RetType
 
 				BaseRecord* funcRecord = new FuncRecord($3.name, $1.type, args);
 				tables.top().table.push_back(funcRecord);
-			}	LBRACE OPENSCOPE 
+
+				CodeBuffer.emit($3.name + ":");
+
+				if($3.name == "main"){
+					CodeBuffer.emit("subu $fp,$sp,4");	
+				} 
+			}	
+				LBRACE OPENSCOPE 
 			{				
 				BaseRecord* record;
 				int size1, res, size, offset = offsets.top();
@@ -141,7 +168,15 @@ FuncDecl	:  RetType
 				}
 
 				args.clear();
-			} Statments RBRACE CLOSESCOPE { funcType = _NULL; }
+			} Statments RBRACE CLOSESCOPE 
+			{ 
+				funcType = _NULL;
+				if($3.name == "main"){
+					CodeBuffer.emit("li $v0, 10");
+					CodeBuffer.emit("syscall");
+				}
+
+			}
 			;
 
 RetType	: Type { $$.type = $1.type; }
@@ -229,9 +264,10 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 
 				$2.place = get_empty_reg();
 				CodeBuffer.emit("subu $sp,$sp,4"); // space in stack for variable
-				CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
-				CodeBuffer.emit("sw $" + NumberToString($2.place) + ",($sp)");
-
+				string str = NumberToString($2.place);
+				CodeBuffer.emit("addu $" + str + ",$" + str + ",$" + str);
+				CodeBuffer.emit("sw $" + str + ",($sp)");
+				free_reg($2.place);
 				// if($2.type == _BOOL){
 				// }
 				// else{
@@ -273,10 +309,10 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				else {
 					$4.place = get_empty_reg();
 					CodeBuffer.bpatch($4.trueList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($2.place) + ",1");
+					CodeBuffer.emit("li $" + NumberToString($2.place) + ",1");
 					int afterTrue = CodeBuffer.emit("j ");
 					CodeBuffer.bpatch($4.falseList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
+					CodeBuffer.emit("li $" + NumberToString($2.place) + ",0");
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
@@ -391,10 +427,10 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				else {
 					$3.place = get_empty_reg();
 					CodeBuffer.bpatch($3.trueList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($1.place) + ",1");
+					CodeBuffer.emit("li $" + NumberToString($1.place) + ",1");
 					int afterTrue = CodeBuffer.emit("j ");
 					CodeBuffer.bpatch($3.falseList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($1.place) + ",0");
+					CodeBuffer.emit("li $" + NumberToString($1.place) + ",0");
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offset) + "($fp)");
@@ -455,6 +491,11 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					exit(0); 
 				}
 
+
+				// int sizeReg = get_empty_reg();
+				// CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
+				// CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
+				// free_reg(sizeReg);
 				int offset = get_arr_offset($1.name);
 				// cout << "offset = " << offset << endl;
 				if($1.type != _BOOL){
@@ -465,16 +506,17 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				else {
 					$6.place = get_empty_reg();
 					CodeBuffer.bpatch($6.trueList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($1.place) + ",1");
+					CodeBuffer.emit("li $" + NumberToString($1.place) + ",1");
 					int afterTrue = CodeBuffer.emit("j ");
 					CodeBuffer.bpatch($6.falseList,CodeBuffer.genLabel());
-					CodeBuffer.emit("move $" + NumberToString($1.place) + ",0");
+					CodeBuffer.emit("li $" + NumberToString($1.place) + ",0");
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($6.place) + "," + NumberToString(-4*(offset+$3.val)) + "($fp)");
 					free_reg($6.place);	
 				}
 				free_reg($3.place);
+				// cout << "here" << endl;
 			}
 			| Call SC
 			| RETURN SC 
@@ -487,6 +529,10 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					errorMismatch(yylineno); 
 					exit(0); 
 				}
+
+				string offset = NumberToString(get_offset_of_vars_in_stack());
+				CodeBuffer.emit("subu $sp,$sp," + offset);
+				CodeBuffer.emit("jr $ra");
 			}
 			| RETURN Exp SC 
 			{ 				
@@ -510,6 +556,27 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					errorMismatch(yylineno); 
 					exit(0);					
 				}
+
+				if($2.type != _BOOL){
+					CodeBuffer.emit("move $v0,$" + NumberToString($2.place));
+					free_reg($2.place);
+					$$.place = 2;					
+				}
+				else {
+					$2.place = get_empty_reg();
+					CodeBuffer.bpatch($2.trueList,CodeBuffer.genLabel());
+					CodeBuffer.emit("li $" + NumberToString($2.place) + ",1");
+					int afterTrue = CodeBuffer.emit("j ");
+					CodeBuffer.bpatch($2.falseList,CodeBuffer.genLabel());
+					CodeBuffer.emit("li $" + NumberToString($2.place) + ",0");
+					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
+					free_reg($2.place);	
+				}
+				string offset = NumberToString(get_offset_of_vars_in_stack());
+				CodeBuffer.emit("subu $sp,$sp," + offset);
+				CodeBuffer.emit("jr $ra");
+				$$.place = 2;
+
 			}
 			| IF LPAREN IfExp RPAREN OPENSCOPE Statement CLOSESCOPE %prec IFX
 
@@ -625,6 +692,11 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			}
 			$$.size = -1;
 			$$.type = $1.type;
+			// cout << "size = " << size << endl;
+			// int sizeReg = get_empty_reg();
+			// CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
+			// CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
+			// free_reg(sizeReg);
 		} 
 		| Exp SUB Exp 
 		{ 
@@ -639,7 +711,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("subu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
-			free_reg($2.place);
+			free_reg($3.place);
 		}
 		| Exp ADD Exp 
 		{ 
@@ -654,7 +726,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("addu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
-			free_reg($2.place);
+			free_reg($3.place);
 		}		
 		| Exp MUL Exp
 		{ 
@@ -669,7 +741,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("mul $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
-			free_reg($2.place);
+			free_reg($3.place);
 		}
 		| Exp DIV Exp
 		{ 
@@ -683,13 +755,14 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.size = -1;
 
 			$$.place = $1.place;
+			CodeBuffer.emit("beq $" + NumberToString($3.place) + ",0,ZeroDivision");
 			CodeBuffer.emit("div $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
-			free_reg($2.place);			
+			free_reg($3.place);			
 		}
 		| ID
 		{ 			
 			type_t type1, type2;
-			int size, res;
+			int size, res, offset;
 			if((res = get_arr_size_and_type($1.name, &type1, &size)) == -1 && 
 				(type2 = get_variable_type($1.name)) == _NULL){ // ID var or arr don't exist
 				errorUndef(yylineno, $1.name);
@@ -706,8 +779,13 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			}
 			$$ = $1;
 
+			// $$.place = get_empty_reg();
 			// if($1.type == _BOOL){
-
+			// 	offset = get_variable_off($1.name);
+			// 	CodeBuffer.emit("lw $" + NumberToString($$.place) + "," + NumberToString(offset*-4) + "($fp)");
+			// 	$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($$.place)));
+			// 	$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+			// 	free_reg($$.place);
 			// } 
 		}
 		| Call { $$ = $1; $$.size = -1;}
@@ -736,7 +814,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		| STRING  
 		{ 
 			string str = yytext;
-			cout << str << endl;
+			// cout << str << endl;
 			$$.type = _STRING; $$.size = -1;
 
 			CodeBuffer.emitData("string 	.asciiz " + NumberToString(str));
@@ -1113,5 +1191,14 @@ int get_empty_reg(){
 			return (it - freeRegs.begin() + 8);
 		}
 	}
+	cout << "Error: all registers are in use" << endl;
 	exit(0);
 };
+
+int get_offset_of_vars_in_stack(){
+	int top = offsets.top();
+	offsets.pop();
+	int offset = top - offsets.top();
+	offsets.push(top);
+	return offset;
+}
