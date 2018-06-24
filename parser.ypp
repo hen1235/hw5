@@ -82,13 +82,13 @@ Program	:
 			CodeBuffer.emit("li $v0,10");
 			CodeBuffer.emit("syscall");
 
-			// CodeBuffer.emitData("IndexOutOfBoundsMsg: 	.asciiz \"Error index out of bounds\n\"");
-			// CodeBuffer.emit("IndexOutOfBounds:");
-			// CodeBuffer.emit("la $a0,IndexOutOfBoundsMsg");
-			// CodeBuffer.emit("li $v0,4");
-			// CodeBuffer.emit("syscall");
-			// CodeBuffer.emit("li $v0,10");
-			// CodeBuffer.emit("syscall");
+			CodeBuffer.emitData("IndexOutOfBoundsMsg: 	.asciiz \"Error index out of bounds\n\"");
+			CodeBuffer.emit("IndexOutOfBounds:");
+			CodeBuffer.emit("la $a0,IndexOutOfBoundsMsg");
+			CodeBuffer.emit("li $v0,4");
+			CodeBuffer.emit("syscall");
+			CodeBuffer.emit("li $v0,10");
+			CodeBuffer.emit("syscall");
 
 
 
@@ -268,6 +268,7 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				CodeBuffer.emit("addu $" + str + ",$" + str + ",$" + str);
 				CodeBuffer.emit("sw $" + str + ",($sp)");
 				free_reg($2.place);
+				$2.place = 0;
 				// if($2.type == _BOOL){
 				// }
 				// else{
@@ -304,6 +305,7 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
 					free_reg($4.place);
+					$4.place = 0;
 					$1.val = $3.val;				
 				}
 				else {
@@ -316,7 +318,8 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
-					free_reg($4.place);	
+					free_reg($4.place);
+					$4.place = 0;	
 				}
 
 			}
@@ -422,6 +425,7 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				if($1.type != _BOOL){
 					CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offset) + "($fp)");
 					free_reg($3.place);
+					$3.place = 0;
 					$1.val = $3.val;				
 				}
 				else {
@@ -434,7 +438,8 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offset) + "($fp)");
-					free_reg($3.place);	
+					free_reg($3.place);
+					$3.place = 0;	
 				}
 			}
 			| ID LBRACK Exp RBRACK ASSIGN Exp SC
@@ -492,15 +497,17 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				}
 
 
-				// int sizeReg = get_empty_reg();
-				// CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
-				// CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
-				// free_reg(sizeReg);
+				int sizeReg = get_empty_reg();
+				CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
+				CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
+				CodeBuffer.emit("blt $" + NumberToString($3.place) + ",$0" + ",IndexOutOfBounds");			
+				free_reg(sizeReg);
 				int offset = get_arr_offset($1.name);
 				// cout << "offset = " << offset << endl;
 				if($1.type != _BOOL){
 					CodeBuffer.emit("sw $" + NumberToString($6.place) + "," + NumberToString(-4*(offset+$3.val)) + "($fp)");
 					free_reg($6.place);
+					$6.place = 0;
 					$1.val = $3.val;				
 				}
 				else {
@@ -513,9 +520,11 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($6.place) + "," + NumberToString(-4*(offset+$3.val)) + "($fp)");
-					free_reg($6.place);	
+					free_reg($6.place);
+					$6.place = 0;	
 				}
 				free_reg($3.place);
+				$3.place = 0;
 				// cout << "here" << endl;
 			}
 			| Call SC
@@ -560,6 +569,7 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 				if($2.type != _BOOL){
 					CodeBuffer.emit("move $v0,$" + NumberToString($2.place));
 					free_reg($2.place);
+					$2.place = 0;
 					$$.place = 2;					
 				}
 				else {
@@ -570,7 +580,8 @@ Statement 	: LBRACE OPENSCOPE Statments CLOSESCOPE RBRACE
 					CodeBuffer.bpatch($2.falseList,CodeBuffer.genLabel());
 					CodeBuffer.emit("li $" + NumberToString($2.place) + ",0");
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
-					free_reg($2.place);	
+					free_reg($2.place);
+					$2.place = 0;	
 				}
 				string offset = NumberToString(get_offset_of_vars_in_stack());
 				CodeBuffer.emit("subu $sp,$sp," + offset);
@@ -693,10 +704,11 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.size = -1;
 			$$.type = $1.type;
 			// cout << "size = " << size << endl;
-			// int sizeReg = get_empty_reg();
-			// CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
-			// CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
-			// free_reg(sizeReg);
+			int sizeReg = get_empty_reg();
+			CodeBuffer.emit("li $" + NumberToString(sizeReg) + "," + NumberToString(size));
+			CodeBuffer.emit("ble $" + NumberToString(sizeReg) + ",$" + NumberToString($3.place) + ",IndexOutOfBounds");
+			CodeBuffer.emit("blt $" + NumberToString($3.place) + ",$0" + ",IndexOutOfBounds");
+			free_reg(sizeReg);
 		} 
 		| Exp SUB Exp 
 		{ 
@@ -711,7 +723,15 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("subu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			if($1.type == _BYTE && $3.type == _BYTE){
+				// cout << "hereee" <<endl;
+				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
+				CodeBuffer.emit("and $" + NumberToString($$.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
+				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
+				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
+			}
 			free_reg($3.place);
+			$3.place = 0;
 		}
 		| Exp ADD Exp 
 		{ 
@@ -726,7 +746,15 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("addu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			if($1.type == _BYTE && $3.type == _BYTE){
+				// cout << "hereee" <<endl;
+				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
+				CodeBuffer.emit("and $" + NumberToString($$.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
+				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
+				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
+			}
 			free_reg($3.place);
+			$3.place = 0;
 		}		
 		| Exp MUL Exp
 		{ 
@@ -741,7 +769,15 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			$$.place = $1.place;
 			CodeBuffer.emit("mul $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
+			if($1.type == _BYTE && $3.type == _BYTE){
+				// cout << "hereee" <<endl;
+				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
+				CodeBuffer.emit("and $" + NumberToString($$.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
+				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
+				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
+			}
 			free_reg($3.place);
+			$3.place = 0;
 		}
 		| Exp DIV Exp
 		{ 
@@ -757,7 +793,15 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.place = $1.place;
 			CodeBuffer.emit("beq $" + NumberToString($3.place) + ",0,ZeroDivision");
 			CodeBuffer.emit("div $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
-			free_reg($3.place);			
+			if($1.type == _BYTE && $3.type == _BYTE){
+				// cout << "hereee" <<endl;
+				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
+				CodeBuffer.emit("and $" + NumberToString($$.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
+				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
+				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
+			}
+			free_reg($3.place);
+			$3.place = 0;		
 		}
 		| ID
 		{ 			
@@ -778,15 +822,22 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$1.size = -1;
 			}
 			$$ = $1;
-
-			// $$.place = get_empty_reg();
-			// if($1.type == _BOOL){
-			// 	offset = get_variable_off($1.name);
-			// 	CodeBuffer.emit("lw $" + NumberToString($$.place) + "," + NumberToString(offset*-4) + "($fp)");
-			// 	$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($$.place)));
-			// 	$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
-			// 	free_reg($$.place);
-			// } 
+			// cout << $1.place << endl; 
+			if($$.place < 8 || $$.place > 25){
+				// cout << "here" << endl;
+				$$.place = get_empty_reg();
+			}
+			
+			offset = get_variable_off($1.name);
+			CodeBuffer.emit("lw $" + NumberToString($$.place) + "," + NumberToString(offset*-4) + "($fp)");
+			if($1.type == _BOOL){
+				$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($$.place) + ",1,"));
+				$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
+				free_reg($$.place);
+				$$.place = 0;
+				$1.place = 0;
+			} 
+	
 		}
 		| Call { $$ = $1; $$.size = -1;}
 		| NUM 
@@ -843,8 +894,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL;
 			$$.size = -1;
 
-			$$.trueList = $$.falseList;
-			$$.falseList = $$.trueList;
+			$$.trueList = $2.falseList;
+			$$.falseList = $2.trueList;
 		}
 		| Exp AND M Exp 
 		{ 
@@ -873,10 +924,12 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ","));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
 			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;
 		}
 		| Exp NEQ Exp 
 		{ 
@@ -884,10 +937,12 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("neq $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("bne $" + NumberToString($1.place) + "," + NumberToString($3.place) + ","));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
 			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;
 		}
 		| Exp LT Exp 
 		{ 
@@ -895,10 +950,12 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("blt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("blt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ","));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
-			free_reg($3.place);		
+			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;		
 		}
 		| Exp GT Exp 
 		{ 
@@ -906,10 +963,12 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _BOOL; 
 			$$.size = -1;
 
-			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("bgt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ", "));
+			$$.trueList = CodeBuffer.makelist(CodeBuffer.emit("bgt $" + NumberToString($1.place) + "," + NumberToString($3.place) + ","));
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
 			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;
 		}
 		| Exp LTE Exp 
 		{ 
@@ -921,6 +980,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
 			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;
 		}
 		| Exp GTE Exp 
 		{ 
@@ -932,6 +993,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 			free_reg($1.place);
 			free_reg($3.place);
+			$1.place = 0;
+			$3.place = 0;
 		}
 		;
 
