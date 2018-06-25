@@ -23,12 +23,14 @@
 
 	vector<int> freeRegs(18,0);
 	CodeBuffer& CodeBuffer = CodeBuffer::instance();
+	int numOfStrings = 0;
 	void free_reg_list(vector<int>& regs);
 	int get_empty_reg();
 	void free_reg(int num);
 	int get_variable_off(string name);
 	int get_arr_off(string name);
 	int get_offset_of_vars_in_stack();
+
 %}
 
 
@@ -667,7 +669,7 @@ IfExp 	: Exp
 		;
 Call	: ID LPAREN P ExpList RPAREN
  		{
- 			int size = 0;
+ 			int size = 0, offset, argsOffSum;
  			type_t type;
 			if(!check_func_exist($1.name, callParams.top(), &type)){
 				errorUndefFunc(yylineno, $1.name);
@@ -682,17 +684,43 @@ Call	: ID LPAREN P ExpList RPAREN
 			CodeBuffer.emit("sw $ra,($sp)");
 			for(vector<Var>::iterator it = callParams.top().begin(); it != callParams.top().end(); ++it){
 				size = it->size;
-				CodeBuffer.emit("addu $sp,$sp," + NumberToString(size*4));
-				CodeBuffer.emit("sw $" + NumberToString(it->place) + ",(sp)");
-
+				if(size == -1){ // variable parameter
+					if(it->type == _STRING){
+						it->place = get_empty_reg();
+						CodeBuffer.emit("la $" + NumberToString(it->place) + ",string" + NumberToString(numOfStrings-1));
+						CodeBuffer.emit("addu $sp,$sp," + NumberToString(-4));
+						CodeBuffer.emit("sw $" + NumberToString(it->place) + ",($sp)");
+					}
+					else if(it->type != _BOOL){
+						CodeBuffer.emit("addu $sp,$sp," + NumberToString(-4));
+						CodeBuffer.emit("sw $" + NumberToString(it->place) + ",($sp)");
+					}
+					else {
+						
+					}
+					free_reg(it->place);
+					it->place = 0;
+				}
+				else { // array parameter
+					offset = get_arr_off(it->name);
+					it->place = get_empty_reg();
+					for(int i = 0; i < size; i++){
+						CodeBuffer.emit("lw $" + NumberToString(it->place) + "," + NumberToString(-4*(i+offset)) + "($fp)");						
+						CodeBuffer.emit("addu $sp,$sp,-4");
+						CodeBuffer.emit("sw $" + NumberToString(it->place) + ",($sp)");				
+					}
+					free_reg(it->place);
+					it->place = 0;
+				}
+				argsOffSum += (size == -1) ? 1 : size;
 			}
 			CodeBuffer.emit("addu $fp,$sp,-4");
 			CodeBuffer.emit("jal " + NumberToString($1.name));
-			CodeBuffer.emit("lw $ra,($sp)");
+			CodeBuffer.emit("lw $ra,($sp)"); // old ra
 			CodeBuffer.emit("addu $sp,$sp,4");
-			CodeBuffer.emit("lw $ra,($sp)");
+			CodeBuffer.emit("lw $fp,($sp)"); // old fp
 			CodeBuffer.emit("addu $sp,$sp,4");			
-
+			CodeBuffer.emit("addu $sp,$sp," + NumberToString(argsOffSum*4)); // delete parameter
 
 			callParams.pop();
 		}
@@ -713,7 +741,7 @@ Call	: ID LPAREN P ExpList RPAREN
 			CodeBuffer.emit("jal " + NumberToString($1.name));
 			CodeBuffer.emit("lw $ra,($sp)");
 			CodeBuffer.emit("addu $sp,$sp,4");
-			CodeBuffer.emit("lw $ra,($sp)");
+			CodeBuffer.emit("lw $fp,($sp)");
 			CodeBuffer.emit("addu $sp,$sp,4");
 
 
@@ -726,12 +754,13 @@ P 	: { callParams.push(vector<Var>()); }
 
 ExpList	: Exp 
 		{ 			
-			Var var = {$1.type, $1.size};
+			Var var = $1;
+
 			callParams.top().push_back(var); 
 		}
 		| Exp
 		{ 			
-			Var var = {$1.type, $1.size}; 
+			Var var = $1; 
 			callParams.top().push_back(var); 
 		} COMMA ExpList 
 
@@ -962,8 +991,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			string str = yytext;
 			// cout << str << endl;
 			$$.type = _STRING; $$.size = -1;
-
-			CodeBuffer.emitData("string 	.asciiz " + NumberToString(str));
+			$$.place = $1.place = get_empty_reg(); 
+			CodeBuffer.emitData("string" + NumberToString(numOfStrings++) + ":	.asciiz " + NumberToString(str));
 		}
 		| TRUE 
 		{ 
