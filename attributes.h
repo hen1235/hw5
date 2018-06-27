@@ -9,6 +9,7 @@
 #include "output.hpp"
 #include <sstream>
 #include "bp.hpp"
+#include <algorithm>
 
 
 using namespace std;
@@ -40,6 +41,8 @@ struct var{
 	vector<int> falseList;
 	vector<int> breakList;
 	string quad;
+	var(){ place=-1; }
+	var(type_t a, int b, string c): type(a), size(b), name(c) {}
 };
 
 typedef struct baseRecord {
