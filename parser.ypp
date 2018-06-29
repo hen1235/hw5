@@ -33,7 +33,6 @@
 	void push_regs();
 	void pop_regs();
 	void free_reg_call(int num);
-	// void print_empty_regs();
 
 %}
 
@@ -82,11 +81,6 @@ Program	:
 			
 			CodeBuffer.emitData("DivByZeroMsg: 	.asciiz \"Error division by zero\n\"");
 			CodeBuffer.emit("ZeroDivision:");
-
-			// CodeBuffer.emit("addu $sp,$sp,-4");
-			// CodeBuffer.emit("sw $fp,($sp)");
-			// CodeBuffer.emit("addu $sp,$sp,-4");
-			// CodeBuffer.emit("sw $ra,($sp)");
 
 			CodeBuffer.emit("la $a0,DivByZeroMsg");
 			CodeBuffer.emit("li $v0,4");
@@ -147,7 +141,12 @@ FuncDecl	:  RetType
 			} 
 				ID
 			{ 					
-				$3.type = $1.type;	
+				$3.type = $1.type;
+				CodeBuffer.emit(".globl " + $3.name);
+				CodeBuffer.emit(".ent " + $3.name);
+				CodeBuffer.emit($3.name + ":");
+
+				
 
 			} 
 				LPAREN Formals RPAREN 	// 5,6,7
@@ -163,14 +162,10 @@ FuncDecl	:  RetType
 
 				BaseRecord* funcRecord = new FuncRecord($3.name, $1.type, args);
 				tables.top().table.push_back(funcRecord);
-
-				CodeBuffer.emit(".globl " + $3.name);
-				CodeBuffer.emit(".ent " + $3.name);
-				CodeBuffer.emit($3.name + ":");
-
 				if($3.name == "main"){
 					CodeBuffer.emit("addu $fp,$sp,-4");	
-				} 
+				} 	
+				
 			}	
 				LBRACE OPENSCOPEIF  // 9,10
 			{				
@@ -199,17 +194,16 @@ FuncDecl	:  RetType
 			} Statments M RBRACE CLOSESCOPEIF  // 12,13,14,15
 			{ 
 				funcType = _NULL;
-				if($3.name == "main"){
-					CodeBuffer.emit("li $v0, 10");
-					CodeBuffer.emit("syscall");
+				CodeBuffer.bpatch($12.nextList, $13.quad);
+				if($3.name != "main"){
+					CodeBuffer.emit("jr $ra");
 				} 
 				else {
-					CodeBuffer.emit("jr $ra");
+					CodeBuffer.emit("li $v0, 10");
+					CodeBuffer.emit("syscall");
 				}
 				CodeBuffer.emit(".end " + $3.name);
-				CodeBuffer.bpatch($12.nextList, $13.quad);
-				// CodeBuffer.bpatch($12.trueList, $13.quad);
-				// CodeBuffer.bpatch($12.falseList, $13.quad);
+				
 			}
 			;
 
@@ -273,8 +267,6 @@ FormalDecl	: Type ID
 Statments	: Statement { $$ = $1; }
 			| Statments Statement
 			{
-				// $$.trueList = CodeBuffer.merge($1.trueList,$2.trueList);
-				// $$.falseList = CodeBuffer.merge($1.falseList,$2.falseList);
 				$$.nextList = CodeBuffer.merge($1.nextList,$2.nextList);
 			}
 			;
@@ -305,11 +297,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				CodeBuffer.emit("sw $0,($sp)"); // initialize var to zero
 				free_reg($2.place);
 				$2.place = -1;
-				// if($2.type == _BOOL){
-				// }
-				// else{
-
-				// }
 			}
 			| Type ID ASSIGN Exp SC
 			{ 				
@@ -335,23 +322,16 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				$2.size = -1;
 				BaseRecord* record = new Record($2.name, $1.type, offsets.top());
 				tables.top().table.push_back(record);
-				// cout << $2.name << " before: " << offsets.top() << endl;
 				offsets.top()++;
-				// cout << $2.name << " after: " << offsets.top() << endl;
 
-				
 				if($2.type != _BOOL){
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $" + NumberToString($4.place) + ",($sp)");
-					// $1.val = $3.val;				
 				}
 				else {
 					if($4.place == -1){
 						$4.place = get_empty_reg();
 					}
-					// if($2.place == -1){
-					// 	$2.place = get_empty_reg();
-					// }
 					CodeBuffer.bpatch($4.trueList,CodeBuffer.genLabel());
 					CodeBuffer.emit("li $" + NumberToString($4.place) + ",1");
 					int afterTrue = CodeBuffer.emit("j ");
@@ -365,16 +345,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				$2.place = -1;
 				free_reg($4.place);
 				$4.place = -1;
-
-				// cout << "var " << $2.name ;
-				// cout << ": ";
-				// for(int i = 0; i < 18; i++){
-				// 	if(regsStack.top()[i] == 1){
-				// 		cout << (i + 8);
-				// 		cout << ", ";
-				// 	}
-				// }
-				// cout << "StackSize = " << regsStack.size() << endl;
 
 			}
 			| Type ID LBRACK NUM RBRACK SC
@@ -403,13 +373,10 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				tables.top().table.push_back(record);
 				offsets.top()+=$2.size;
 
-				// CodeBuffer.emit("subu $sp,$sp," + NumberToString($2.size*4)); // space in stack for array
 				for(int i = 0; i < $2.size; i++){ // allocate array in stack and zero cells
 					CodeBuffer.emit("subu $sp,$sp,4");
 					CodeBuffer.emit("sw $0,($sp)");
 				}
-				// CodeBuffer.emit("move $" + NumberToString($2.place) + ",0");
-				// CodeBuffer.emit("sw $" + NumberToString($2.place) + ",($sp)");
 				free_reg($2.place);
 				$2.place = -1;
 				free_reg($4.place);
@@ -509,7 +476,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 						CodeBuffer.bpatch($3.falseList,CodeBuffer.genLabel());
 						CodeBuffer.emit("li $" + NumberToString($3.place) + ",0");
 						CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
-						// CodeBuffer.emit("subu $sp,$sp,4");
 						CodeBuffer.emit("sw $" + NumberToString($3.place) + "," + NumberToString(-4*offsetID) + "($fp)");	
 					}
 				}
@@ -555,7 +521,7 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 					$6.type = type2;
 					$6.size = -1;
 				}
-				
+				// cout << $6.size << endl;
 				if($6.size != -1){
 					errorMismatch(yylineno); 
 					exit(0); 
@@ -589,8 +555,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				CodeBuffer.emit("blt $" + NumberToString($3.place) + ",$0" + ",IndexOutOfBounds");			
 				free_reg(sizeReg);
 				int offset = get_arr_off($1.name);
-				// cout << "offset = " << offset << endl;
-				// cout << "val  = " << $3.val << endl;
 
 				if($1.type == _BOOL){
 					if($6.place == -1){
@@ -602,7 +566,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 					CodeBuffer.bpatch($6.falseList,CodeBuffer.genLabel());
 					CodeBuffer.emit("li $" + NumberToString($6.place) + ",0");
 					CodeBuffer.bpatch(CodeBuffer.makelist(afterTrue),CodeBuffer.genLabel());
-					// CodeBuffer.emit("subu $sp,$sp,4");
 				}
 				CodeBuffer.emit("mul $" + NumberToString($3.place) + ",$" + NumberToString($3.place) + ",-4"); // array index				
 				CodeBuffer.emit("addu $" + NumberToString($3.place) + ",$" + NumberToString($3.place) + ",$fp"); // index + fp
@@ -617,7 +580,6 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				$6.place = -1;
 				free_reg($3.place);
 				$3.place = -1;
-				// cout << "here" << endl;
 			}
 			| Call SC
 			| RETURN SC 
@@ -631,8 +593,7 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 					exit(0); 
 				}
 
-				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-				CodeBuffer.emit("addu $sp,$sp," + offset);
+				CodeBuffer.emit("addu $sp,$sp," + NumberToString(get_offset_of_vars_in_stack()*4));
 				CodeBuffer.emit("jr $ra");
 			}
 			| RETURN Exp SC 
@@ -679,15 +640,13 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				}
 				free_reg($2.place);
 				$2.place = -1;
-				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-				CodeBuffer.emit("addu $sp,$sp," + offset);
+				CodeBuffer.emit("addu $sp,$sp," + NumberToString(get_offset_of_vars_in_stack()*4));
 				CodeBuffer.emit("jr $ra");
 
 			}
 			| IF LPAREN IfExp RPAREN OPENSCOPEIF M Statement CLOSESCOPEIF %prec IFX
 			{
 				$$.nextList = $7.nextList;
-				// cout << $6.quad << endl;
 				CodeBuffer.bpatch($3.trueList,$6.quad);
 				CodeBuffer.bpatch($3.falseList,CodeBuffer.genLabel());
 				
@@ -725,9 +684,7 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 					errorUnexpectedBreak(yylineno); 
 					exit(0);
 				}
-				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-				// cout << offset << endl;
-				CodeBuffer.emit("addu $sp,$sp," + offset);
+				CodeBuffer.emit("addu $sp,$sp," + NumberToString(get_offset_of_vars_in_stack()*4));
 				$$.nextList = $3.nextList;
 				
 			}
@@ -755,30 +712,14 @@ Call	: ID LPAREN P ExpList RPAREN
 
 			$$.type = $1.type = type;
 
-			// int reg = get_empty_reg();
-			// cout << $1.name << ": " << "reg = " << reg << endl;
-			// // free_reg(reg);
-			// cout << "begin " << $1.name ;
-			// cout << ": ";
-			// for(int i = 0; i < 18; i++){
-			// 	if(regsStack.top()[i] == 1){
-			// 		cout << (i + 8);
-			// 		cout << ", ";
-			// 	}
-			// }
-			// cout << "StackSize = " << regsStack.size() << endl;
-
 			push_regs();
-
 			CodeBuffer.emit("addu $sp,$sp,-4");
 			CodeBuffer.emit("sw $fp,($sp)");
 			CodeBuffer.emit("addu $sp,$sp,-4");
 			CodeBuffer.emit("sw $ra,($sp)");
 			for(vector<Var>::reverse_iterator it = callParams.top().rbegin(); it != callParams.top().rend(); ++it){
 				size = it->size;
-				// cout << "name = " << it->name << " reg = " << it->place << endl;
 				if(it->place == -1){
-					// cout << $1.name << " here " << it->type << endl;
 					it->place = get_empty_reg();
 				}
 				if(size == -1){ // variable parameter
@@ -797,26 +738,11 @@ Call	: ID LPAREN P ExpList RPAREN
 						CodeBuffer.emit("sw $" + NumberToString(it->place) + ",($sp)");				
 					}
 				}
-				// free_reg_call(it->place);
-				// it->place = -1;
-
 				argsOffSum += (size == -1) ? 1 : size;
 			}
-			// free_reg($4.place);
-			// $4.place = -1;
-			// cout << argsOffSum << endl;
-			// for(vector<Var>::iterator it = callParams.top().begin(); it != callParams.top().end(); ++it){
-			// 	free_reg(it->place);
-			// 	it->place = -1;
-			// }
 
 			CodeBuffer.emit("addu $fp,$sp,-4");
 			CodeBuffer.emit("jal " + NumberToString($1.name));
-			// if($1.type == _VOID){
-			// 	string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-			// 	// cout << offset << endl;
-			// 	CodeBuffer.emit("addu $sp,$sp," + offset);
-			// }
 			CodeBuffer.emit("addu $sp,$sp," + NumberToString(argsOffSum*4)); // delete parameters from stack
 			CodeBuffer.emit("lw $ra,($sp)"); // old ra
 			CodeBuffer.emit("addu $sp,$sp,4");
@@ -828,17 +754,6 @@ Call	: ID LPAREN P ExpList RPAREN
 				it->place = -1;
 			}
 			callParams.pop();
-
-			// cout << "end " << $1.name ;
-			// cout << ": ";
-			// for(int i = 0; i < 18; i++){
-			// 	if(regsStack.top()[i] == 1){
-			// 		cout << (i + 8);
-			// 		cout << ", ";
-			// 	}
-			// }
-			// cout << "StackSize = " << regsStack.size() << endl;
-		
 		}
 		| ID LPAREN RPAREN 
 		{
@@ -882,10 +797,6 @@ ExpList	: Exp
 			}
 			callParams.top().push_back($1);
 			$$ = $1;
-
-			// $$ = var;
-			// free_reg($$.place);
-			// $$.place = -1; 
 		}
 		| Exp
 		{ 			
@@ -902,11 +813,7 @@ ExpList	: Exp
 			}	
 			callParams.top().push_back($1);
 			$$ = $1;
-			// $$ = var;
-			// free_reg(var..place);
-			// $$.place = -1;
 		} COMMA ExpList 
-
 		;
 
 Type 	: INT { $$.type = _INT; }
@@ -955,7 +862,6 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			}
 			$$.size = -1;
 			$$.type = $1.type;
-			// cout << "size = " << size << endl;
 			CodeBuffer.emit("bge $" + NumberToString($3.place) + "," + NumberToString(size) + ",IndexOutOfBounds");
 			CodeBuffer.emit("blt $" + NumberToString($3.place) + ",$0" + ",IndexOutOfBounds");
 			
@@ -977,11 +883,6 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				$1.place = -1;
 			} 
 			$$.place = $1.place;
-
-			// free_reg($1.place);
-			
-			
-
 		} 
 		| Exp SUB Exp 
 		{ 
@@ -996,11 +897,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			CodeBuffer.emit("subu $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
 			if($1.type == _BYTE && $3.type == _BYTE){
-				// cout << "hereee" <<endl;
 				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
 				CodeBuffer.emit("and $" + NumberToString($1.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
-				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
-				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
 			}
 			$$.place = $1.place;
 			free_reg($3.place);
@@ -1017,14 +915,10 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			} 
 			$$.size = -1;
 
-			// cout << "here" << endl;
 			CodeBuffer.emit("addu $" + NumberToString($1.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
 			if($1.type == _BYTE && $3.type == _BYTE){
-				// cout << "hereee" <<endl;
 				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
 				CodeBuffer.emit("and $" + NumberToString($1.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
-				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
-				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
 			}
 			$$.place = $1.place;
 			free_reg($3.place);
@@ -1043,11 +937,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 
 			CodeBuffer.emit("mul $" + NumberToString($$.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
 			if($1.type == _BYTE && $3.type == _BYTE){
-				// cout << "hereee" <<endl;
 				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
 				CodeBuffer.emit("and $" + NumberToString($1.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
-				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
-				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
 			}
 			$$.place = $1.place;
 			free_reg($3.place);
@@ -1067,11 +958,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			CodeBuffer.emit("beq $" + NumberToString($3.place) + ",0,ZeroDivision");
 			CodeBuffer.emit("div $" + NumberToString($1.place) + ",$" + NumberToString($1.place) + ",$" + NumberToString($3.place));
 			if($1.type == _BYTE && $3.type == _BYTE){
-				// cout << "hereee" <<endl;
 				CodeBuffer.emit("li $" + NumberToString($3.place) + ",0x000000ff");
 				CodeBuffer.emit("and $" + NumberToString($1.place)+ ",$" + NumberToString($1.place) +",$" + NumberToString($3.place));
-				// CodeBuffer.emit("div $" + NumberToString($$.place)+ ",$" + NumberToString($3.place));
-				// CodeBuffer.emit("mfhi $" + NumberToString($$.place));
 			}
 			$$.place = $1.place;			
 			free_reg($3.place);
@@ -1097,7 +985,6 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 					$1.place = get_empty_reg();
 				}
 				offset = get_variable_off($1.name);
-				// cout << "name =" << $1.name << " offset = " << offset << endl;
 				CodeBuffer.emit("lw $" + NumberToString($1.place) + "," + NumberToString(offset*-4) + "($fp)");
 				if($1.type == _BOOL){
 					$1.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($1.place) + ",1,"));
@@ -1114,7 +1001,6 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		| Call 
 		{ 
 			$1.size = -1;
-			// cout << "callReg = " << $1.place << endl;
 			if($1.place == -1){
 				$1.place = get_empty_reg();
 			}
@@ -1143,7 +1029,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 			$$.type = _INT; 
 			$$.val = $1.val; 
 			$$.size = -1;
-
+			$$.name = "0";
 			
 			$$.place = get_empty_reg();
 			CodeBuffer.emit("li $" + NumberToString($$.place) + "," + NumberToString($1.val));
@@ -1154,6 +1040,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				errorByteTooLarge(yylineno,NumberToString($1.val));
 				exit(0);
 			}
+			$$.name = "0";
 			$$.type = _BYTE; 
 			$$.val = $1.val;
 			$$.size = -1;
@@ -1163,15 +1050,15 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		}
 		| STRING  
 		{ 
+			$$.name = "0";
 			string str = yytext;
-			// cout << str << endl;
 			$$.type = _STRING; 
 			$$.size = -1;
-			// $$.place = $1.place = get_empty_reg(); 
 			CodeBuffer.emitData("string" + NumberToString(numOfStrings++) + ":	.asciiz " + NumberToString(str));
 		}
 		| TRUE 
 		{ 
+			$$.name = "0";
 			$$.type = _BOOL; 
 			$$.size = -1;
 			$$.place = -1;
@@ -1179,6 +1066,7 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		}
 		| FALSE 
 		{ 
+			$$.name = "0";
 			$$.type = _BOOL; 
 			$$.size = -1;
 			$$.place = -1;
@@ -1201,7 +1089,6 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 		}
 		| Exp AND M Exp 
 		{ 
-			// cout << "here" << endl;
 			match_operands($1.type,$4.type,false); 
 			$$.type = _BOOL; 
 			$$.size = -1;
@@ -1323,18 +1210,7 @@ N 	:
 		$$.nextList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 	}
 
-// OPENSCOPE	: {
-// 				Tuple tuple;
-// 				tuple.parent = &(tables.top());
-// 				tables.push(tuple);
-// 				// cout << " size : " << offsets.size() << endl;
-// 				offsets.push(offsets.top());
-// 				// cout << " size : " << offsets.size() << endl;
-// 			}
-// 			;
-
 CLOSESCOPE	: {
-				//endScope();
 				Tuple* tuple = &(tables.top());
 				vector<BaseRecord*>* table = &(tuple->table);
 				
@@ -1344,13 +1220,11 @@ CLOSESCOPE	: {
 				for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
 					arrRecord = dynamic_cast<ArrRecord*>(*it);
 					if(arrRecord != NULL){ // record of array
-						//printID(arrRecord->name,arrRecord->offset,makeArrayType(types[arrRecord->type],arrRecord->size));
 						continue;
 					}
 
 					record = dynamic_cast<Record*>(*it);
 					if(record != NULL){ // record of variable	
-						//printID(record->name, record->offset, types[record->type]);
 						continue;
 					}
 
@@ -1365,7 +1239,6 @@ CLOSESCOPE	: {
 							tmp.push_back(types[it->type]);
 
 						}
-						//printID(funcRecord->name, 0, makeFunctionType(types[funcRecord->type],tmp));
 						continue;
 					}
 				}
@@ -1378,17 +1251,11 @@ OPENSCOPEIF	: {
 				Tuple tuple;
 				tuple.parent = &(tables.top());
 				tables.push(tuple);
-				// cout << " ifsize : " << offsets.size() << endl;
-				// cout << "startoffset: " << offsets.top() <<" size : " << offsets.size() << endl;
 				offsets.push(offsets.top());
-				// cout << " ifsize : " << offsets.size() << endl;
-				// cout << "startoffset: " << offsets.top() <<" size : " << offsets.size() << endl;
 			}
 			;
 
 CLOSESCOPEIF	: {
-				//endScope();
-				// cout << "endoffset: " << offsets.top() << " size : " << offsets.size() << endl;
 				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
 				CodeBuffer.emit("addu $sp,$sp," + offset);
 
@@ -1401,13 +1268,11 @@ CLOSESCOPEIF	: {
 				for(vector<BaseRecord*>::iterator it = table->begin(); it != table->end(); ++it){
 					arrRecord = dynamic_cast<ArrRecord*>(*it);
 					if(arrRecord != NULL){ // record of array
-						//printID(arrRecord->name,arrRecord->offset,makeArrayType(types[arrRecord->type],arrRecord->size));
 						continue;
 					}
 
 					record = dynamic_cast<Record*>(*it);
 					if(record != NULL){ // record of variable	
-						//printID(record->name, record->offset, types[record->type]);
 						continue;
 					}
 
@@ -1422,7 +1287,6 @@ CLOSESCOPEIF	: {
 							tmp.push_back(types[it->type]);
 
 						}
-						//printID(funcRecord->name, 0, makeFunctionType(types[funcRecord->type],tmp));
 						continue;
 					}
 				}
@@ -1647,9 +1511,7 @@ int get_empty_reg(){
 
 int get_offset_of_vars_in_stack(){
 	int top = offsets.top();
-	// cout << "beforetop: " << offsets.top() << endl;
 	offsets.pop();
-	// cout << "aftertop: " << offsets.top() << endl;
 	int offset = top - offsets.top();
 	offsets.push(top);
 	return offset;
@@ -1659,7 +1521,6 @@ void push_regs(){
 	vector<int> newRegs(18,0);
 	for(vector<int>::iterator it = regsStack.top().begin(); it != regsStack.top().end(); ++it){
 		if(*it == 1){
-			// cout << "pushRegNum = " << *it << endl;
 			CodeBuffer.emit("addu $sp,$sp,-4");
 			CodeBuffer.emit("sw $" + NumberToString(it - regsStack.top().begin() + 8) + ",($sp)");	
 		}
@@ -1672,22 +1533,8 @@ void pop_regs(){
 	for(int i = 17; i >= 0; --i){
 		if(regsStack.top()[i] == 1){
 			
-			// cout << "popRegNum = " << *it << endl;
 			CodeBuffer.emit("lw $" + NumberToString(i + 8) + ",($sp)");
 			CodeBuffer.emit("addu $sp,$sp,4");	
 		}
 	}
 }
-
-// void print_empty_regs(){
-// 	for(int i = 0; i < 18; i++){
-// 		if(regsStack.top()[i] == 1){
-// 			cout << (i + 8) << ", ";
-// 		}
-		
-// 	}
-// 	 endl;
-// 	// return -1;
-// 	// cout << "Error: all registers are in use" << endl;
-// 	// exit(0);
-// };
