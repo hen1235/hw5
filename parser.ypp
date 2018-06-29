@@ -632,7 +632,7 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				}
 
 				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-				CodeBuffer.emit("subu $sp,$sp," + offset);
+				CodeBuffer.emit("addu $sp,$sp," + offset);
 				CodeBuffer.emit("jr $ra");
 			}
 			| RETURN Exp SC 
@@ -680,7 +680,7 @@ Statement 	: LBRACE OPENSCOPEIF Statments CLOSESCOPEIF RBRACE { $$ = $3; }
 				free_reg($2.place);
 				$2.place = -1;
 				string offset = NumberToString(get_offset_of_vars_in_stack()*4);
-				CodeBuffer.emit("subu $sp,$sp," + offset);
+				CodeBuffer.emit("addu $sp,$sp," + offset);
 				CodeBuffer.emit("jr $ra");
 
 			}
@@ -1126,7 +1126,8 @@ Exp 	: LPAREN Exp RPAREN { $$ = $2; }
 				free_reg($1.place);
 				$1.place = -1;
 			}
-			if($1.type == _BOOL){
+			else if($1.type == _BOOL){
+				CodeBuffer.emit("move $" + NumberToString($1.place) + ",$v0");
 				$1.trueList = CodeBuffer.makelist(CodeBuffer.emit("beq $" + NumberToString($1.place) + ",1,"));
 				$1.falseList = CodeBuffer.makelist(CodeBuffer.emit("j "));
 				free_reg($1.place);
