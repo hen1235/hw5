@@ -39,7 +39,6 @@ struct var{
 	vector<int> nextList;
 	vector<int> trueList;
 	vector<int> falseList;
-	vector<int> breakList;
 	string quad;
 	var(){ place=-1; }
 	var(type_t a, int b, string c): type(a), size(b), name(c) {}
